@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Route Finder</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+    <script src="{{ url_for('static', filename='script.js') }}"
+            defer></script>
+</head>
+
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">SR</div>
+            <h1>Smart Route Finder</h1>
+            <p>Find the shortest route using Dijkstra's Algorithm</p>
+        </div>
+    </header>
+
+    <main>
+        <section class="route-card">
+            <h2>Plan Your Journey</h2>
+            <p class="description">
+                Choose your starting city and destination to calculate
+                the shortest route.
+            </p>
+
+            <form id="route-form">
+                <label for="start">Starting City</label>
+                <select name="start" id="start" required>
+                    {% for city in cities %}
+                    <option value="{{ city }}"
+                        {% if city == 'Ludhiana' %}selected{% endif %}>
+                        {{ city }}
+                    </option>
+                    {% endfor %}
+                </select>
+
+                <button type="button" id="swap-button" class="swap-button">
+                    ⇅ Swap cities
+                </button>
+
+                <label for="destination">Destination City</label>
+                <select name="destination" id="destination" required>
+                    {% for city in cities %}
+                    <option value="{{ city }}"
+                        {% if city == 'Mohali' %}selected{% endif %}>
+                        {{ city }}
+                    </option>
+                    {% endfor %}
+                </select>
+
+                <label class="checkbox-row" for="traffic">
+                    <input type="checkbox" id="traffic">
+                    Avoid heavy traffic
+                </label>
+
+                <button type="submit" id="find-route-button">
+                    Find Shortest Route
+                </button>
+            </form>
+
+            <p id="loading-message" class="loading-message"
+               role="status" hidden>
+                Calculating shortest route...
+            </p>
+
+            <p id="error-message" class="error-message"
+               role="alert" hidden></p>
+
+            <div class="history-box">
+                <div class="history-heading">
+                    <h3>Recent Searches</h3>
+                    <button type="button" id="clear-history" class="clear-button">
+                        Clear
+                    </button>
+                </div>
+                <ul class="history-list" id="history-list"></ul>
+            </div>
+        </section>
+
+        <section class="result-card" id="result-card" hidden>
+            <div class="result-heading">
+                <span class="result-icon">✓</span>
+                <div>
+                    <h2 id="result-title">Shortest Route Found</h2>
+                    <p class="description" id="result-description">
+                        Your route has been calculated.
+                    </p>
+                </div>
+            </div>
+
+            <div class="distance-panel">
+                <p>Total Distance</p>
+                <div class="distance">
+                    <span id="total-distance">0</span>
+                    <span>km</span>
+                </div>
+            </div>
+
+            <h3 class="section-subheading">Your Route</h3>
+            <div class="route" id="route-sequence"></div>
+
+            <h3 class="section-subheading">Distance Per Road</h3>
+            <ul class="legs" id="route-legs"></ul>
+
+            <p class="success-message">
+                Calculated using Dijkstra's shortest-path algorithm.
+            </p>
+        </section>
+
+        <section class="info-card">
+            <h2>Road Network Graph</h2>
+            <p class="description">
+                Highlighted roads show every segment of the calculated
+                shortest route. Other roads remain visible for comparison.
+            </p>
+
+            <div class="graph-container">
+                <svg id="road-graph"
+                     viewBox="0 0 640 390"
+                     role="img"
+                     aria-label="Road network connecting the cities">
+
+                    <defs>
+                        <filter id="routeGlow"
+                                filterUnits="userSpaceOnUse"
+                                x="0" y="0"
+                                width="640" height="390">
+                            <feGaussianBlur stdDeviation="2"
+                                            result="blur"/>
+                            <feMerge>
+                                <feMergeNode in="blur"/>
+                                <feMergeNode in="SourceGraphic"/>
+                            </feMerge>
+                        </filter>
+                    </defs>
+
+                    <!-- Normal roads -->
+                    {% for road in roads %}
+                    {% set x1 = positions[road['from']]['x'] %}
+                    {% set y1 = positions[road['from']]['y'] %}
+                    {% set x2 = positions[road['to']]['x'] %}
+                    {% set y2 = positions[road['to']]['y'] %}
+
+                    <g class="road"
+                       data-from="{{ road['from'] }}"
+                       data-to="{{ road['to'] }}">
+                        <line x1="{{ x1 }}" y1="{{ y1 }}"
+                              x2="{{ x2 }}" y2="{{ y2 }}"
+                              class="road-line"/>
+                    </g>
+                    {% endfor %}
+
+                    <!-- JavaScript draws the highlighted route here -->
+                    <g id="highlighted-roads"></g>
+
+                    <!-- City nodes -->
+                    {% for city in cities %}
+                    <g class="city-node">
+                        <circle
+                            cx="{{ positions[city]['x'] }}"
+                            cy="{{ positions[city]['y'] }}"
+                            r="39"
+                            class="city-circle"/>
+
+                        <text
+                            x="{{ positions[city]['x'] }}"
+                            y="{{ positions[city]['y'] + 4 }}"
+                            text-anchor="middle"
+                            class="city-label">
+                            {{ city }}
+                        </text>
+                    </g>
+                    {% endfor %}
+
+                    <!-- Distance labels (drawn last so they stay readable) -->
+                    <g id="distance-labels-overlay">
+                        {% for road in roads %}
+                        {% set x1 = positions[road['from']]['x'] %}
+                        {% set y1 = positions[road['from']]['y'] %}
+                        {% set x2 = positions[road['to']]['x'] %}
+                        {% set y2 = positions[road['to']]['y'] %}
+                        {% set dx = x2 - x1 %}
+                        {% set dy = y2 - y1 %}
+                        {% set length = (dx * dx + dy * dy) ** 0.5 %}
+                        {% set offset_x = (dy / length * 17) if length else 0 %}
+                        {% set offset_y = (-dx / length * 17) if length else 0 %}
+                        {% set mx = (x1 + x2) / 2 + offset_x %}
+                        {% set my = (y1 + y2) / 2 + offset_y %}
+
+                        <g class="distance-label"
+                           transform="translate({{ mx }}, {{ my }})">
+                            <rect x="-31" y="-12"
+                                  width="62" height="24"
+                                  rx="7" class="label-background"/>
+                            <circle cx="-21" cy="0" r="4"
+                                    class="traffic-dot traffic-{{ road['traffic'] }}"/>
+                            <text x="5" y="4"
+                                  text-anchor="middle"
+                                  class="road-distance">
+                                {{ road['distance'] }} km
+                            </text>
+                        </g>
+                        {% endfor %}
+                    </g>
+
+                </svg>
+            </div>
+
+            <div class="legend">
+                <span class="legend-item">
+                    <span class="legend-line highlighted"></span>
+                    Shortest route
+                </span>
+                <span class="legend-item">
+                    <span class="legend-line normal"></span>
+                    Other roads
+                </span>
+                <span class="legend-item">
+                    <span class="traffic-dot traffic-light"></span>
+                    Light traffic
+                </span>
+                <span class="legend-item">
+                    <span class="traffic-dot traffic-moderate"></span>
+                    Moderate
+                </span>
+                <span class="legend-item">
+                    <span class="traffic-dot traffic-heavy"></span>
+                    Heavy
+                </span>
+            </div>
+
+            <p class="graph-note">
+                Road distances and traffic levels are illustrative example
+                values, not verified real-world data.
+            </p>
+        </section>
+
+        <section class="info-card">
+            <h2>How Dijkstra's Algorithm Works</h2>
+            <ol class="steps-list">
+                <li>Set the source city's distance to zero.</li>
+                <li>Select the city with the smallest known distance.</li>
+                <li>Examine connected roads and update shorter distances.</li>
+                <li>Continue until the destination's shortest distance is found.</li>
+                <li>Reconstruct the route using the recorded previous cities.</li>
+            </ol>
+        </section>
+
+        <section class="info-card project-info">
+            <h2>About This Project</h2>
+            <p>
+                This project demonstrates Dijkstra's shortest-path algorithm
+                using a weighted graph of cities and road distances.
+                Python performs the calculation, Flask connects the algorithm
+                to the website, JavaScript updates results without a page
+                reload, and SVG visualizes the selected route. When traffic
+                mode is on, busy roads get a higher weight, so the algorithm
+                can choose a longer but faster route. Every search is saved
+                in an SQLite database.
+            </p>
+
+            <div class="tech-tags">
+                <span>Python</span>
+                <span>Dijkstra's Algorithm</span>
+                <span>Flask</span>
+                <span>SQLite</span>
+                <span>HTML &amp; CSS</span>
+                <span>JavaScript</span>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>DAA Mini Project</p>
+        <p>Smart Route Finder Using Dijkstra's Algorithm</p>
+    </footer>
+</body>
+</html>
